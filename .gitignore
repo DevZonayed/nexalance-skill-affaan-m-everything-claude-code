@@ -100,3 +100,6 @@ ecc2/target/
 .opencode/package-lock.json
 .opencode/node_modules/
 assets/images/security/badrudi-exploit.mp4
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
