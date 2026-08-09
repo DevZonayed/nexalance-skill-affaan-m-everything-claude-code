@@ -100,6 +100,34 @@ async function runTests() {
     fs.rmSync(empty, { recursive: true, force: true });
   })) passed++; else failed++;
 
+  // Regression: a name match of the WRONG kind must not suppress the full rescan.
+  // Filtering after collection made find() report ABSENT for a symbol that exists.
+  if (await asyncTest('STALENESS: --kind never returns ABSENT when a stale file has the match', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ecc-kind-'));
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'a.js'), 'function Widget(){}\n');
+    fs.writeFileSync(path.join(root, 'src', 'b.js'), 'const x = 1;\n');
+    await query.build(root);
+    // Behind the index, b.js gains a CLASS with the same name as a.js's function.
+    fs.writeFileSync(path.join(root, 'src', 'b.js'), 'class Widget {}\n');
+    const r = await query.find(root, 'Widget', { kind: 'class' });
+    assert.strictEqual(r.code, query.EXIT.ANSWERED,
+      `expected ANSWERED, got ${r.code}: a stale file defines class Widget`);
+    assert.strictEqual(r.results[0].path, 'src/b.js');
+    assert.strictEqual(r.results[0].kind, 'class');
+    fs.rmSync(root, { recursive: true, force: true });
+  })) passed++; else failed++;
+
+  if (await asyncTest('--kind still returns ABSENT when the kind genuinely does not exist', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ecc-kind2-'));
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'a.js'), 'function Widget(){}\n');
+    await query.build(root);
+    const r = await query.find(root, 'Widget', { kind: 'class' });
+    assert.strictEqual(r.code, query.EXIT.ABSENT, `expected ABSENT, got ${r.code}`);
+    fs.rmSync(root, { recursive: true, force: true });
+  })) passed++; else failed++;
+
   if (await asyncTest('status emits a one-line summary', async () => {
     const r = await query.status(repo);
     assert.strictEqual(r.code, query.EXIT.ANSWERED);

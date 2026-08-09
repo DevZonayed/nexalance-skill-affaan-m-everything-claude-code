@@ -94,6 +94,13 @@ async function find(repoRoot, name, opts) {
 
   // Any file previously holding this symbol must be re-verified, and so must
   // every file whose shard may have gained it since the last build.
+  // The kind filter must be applied while collecting, not afterwards. Filtering
+  // later lets a name match of the wrong kind suppress the full rescan below, so a
+  // newly added symbol of the requested kind in a stale file would be reported
+  // ABSENT — conflating "not there" with "unknown" and breaking the exit contract.
+  const matchesQuery = symbol =>
+    symbol.name === name && (!options.kind || symbol.kind === options.kind);
+
   const results = [];
   const checked = new Set();
   for (const relPath of candidatePaths) {
@@ -101,7 +108,7 @@ async function find(repoRoot, name, opts) {
     const { shard } = await verifyFresh(repoRoot, relPath);
     if (!shard) continue;
     for (const symbol of shard.symbols || []) {
-      if (symbol.name === name) {
+      if (matchesQuery(symbol)) {
         results.push({ path: relPath, line: symbol.line, kind: symbol.kind,
           signature: symbol.signature, doc: symbol.doc, exported: symbol.exported });
       }
@@ -116,7 +123,7 @@ async function find(repoRoot, name, opts) {
       const { shard } = await verifyFresh(repoRoot, file.path);
       if (!shard) continue;
       for (const symbol of shard.symbols || []) {
-        if (symbol.name === name) {
+        if (matchesQuery(symbol)) {
           results.push({ path: file.path, line: symbol.line, kind: symbol.kind,
             signature: symbol.signature, doc: symbol.doc, exported: symbol.exported });
         }
@@ -124,9 +131,7 @@ async function find(repoRoot, name, opts) {
     }
   }
 
-  const filtered = options.kind
-    ? results.filter(r => r.kind === options.kind)
-    : results;
+  const filtered = results;
 
   return {
     code: filtered.length ? EXIT.ANSWERED : EXIT.ABSENT,
