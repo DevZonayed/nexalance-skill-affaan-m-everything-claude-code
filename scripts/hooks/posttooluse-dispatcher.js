@@ -19,6 +19,7 @@ const { run: runSessionActivityTracker } = require('./session-activity-tracker')
 const { run: runObserve } = require('./observe-runner');
 const { run: runMetricsBridge } = require('./ecc-metrics-bridge');
 const { run: runContextMonitor } = require('./ecc-context-monitor');
+const { run: runGraphUpdate } = require('./graph-update');
 
 const MAX_STDIN = 1024 * 1024;
 
@@ -45,7 +46,8 @@ const ASYNC_HOOKS = [
     }
   },
   { id: 'post:quality-gate', matcher: 'Edit|Write|MultiEdit', profiles: 'standard,strict', script: 'scripts/hooks/quality-gate.js', run: runQualityGate },
-  { id: 'post:observe:continuous-learning', matcher: '*', profiles: 'standard,strict', script: 'scripts/hooks/observe-runner.js', run: runObserve }
+  { id: 'post:observe:continuous-learning', matcher: '*', profiles: 'standard,strict', script: 'scripts/hooks/observe-runner.js', run: runObserve },
+  { id: 'post:graph-update', matcher: 'Edit|Write|MultiEdit', profiles: 'standard,strict', script: 'scripts/hooks/graph-update.js', run: runGraphUpdate }
 ];
 
 function getPluginRoot(env = process.env) {
