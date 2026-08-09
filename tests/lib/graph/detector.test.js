@@ -5,7 +5,10 @@
  */
 
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const { spawnSync } = require('child_process');
 const detector = require('../../../scripts/lib/graph/detector');
 
 const FIXTURE = path.join(__dirname, '..', '..', 'fixtures', 'graph', 'sample-repo');
@@ -55,6 +58,28 @@ function runTests() {
 
   if (test('finds the package.json main entrypoint', () => {
     assert.ok(detector.findEntrypoints(FIXTURE).includes('src/main.js'));
+  })) passed++; else failed++;
+
+  if (test('inside a git repo, excludes gitignored files', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'det-git-'));
+    spawnSync('git', ['-C', root, 'init', '-q']);
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'kept.js'), 'function a(){}\n');
+    fs.writeFileSync(path.join(root, 'src', 'ignored.js'), 'function b(){}\n');
+    fs.writeFileSync(path.join(root, '.gitignore'), 'src/ignored.js\n');
+    const found = detector.listSourceFiles(root).map(f => f.path);
+    assert.ok(found.includes('src/kept.js'), `untracked-but-not-ignored missing: ${JSON.stringify(found)}`);
+    assert.ok(!found.includes('src/ignored.js'), `gitignored file leaked: ${JSON.stringify(found)}`);
+    fs.rmSync(root, { recursive: true, force: true });
+  })) passed++; else failed++;
+
+  if (test('outside a git repo, falls back to a filesystem walk', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'det-nogit-'));
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'a.js'), 'function a(){}\n');
+    const found = detector.listSourceFiles(root).map(f => f.path);
+    assert.deepStrictEqual(found, ['src/a.js']);
+    fs.rmSync(root, { recursive: true, force: true });
   })) passed++; else failed++;
 
   console.log('\n=== Test Results ===');

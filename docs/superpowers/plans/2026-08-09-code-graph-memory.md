@@ -281,7 +281,11 @@ git commit -m "feat(graph): add pinned WASM tree-sitter grammar loader"
 - Consumes: `supportedLanguages()` from Task 1
 - Produces:
   - `languageForFile(relPath: string): string|null` — extension → language id
-  - `listSourceFiles(repoRoot: string): Array<{path: string, lang: string}>` — repo-relative paths, git-tracked only
+  - `listSourceFiles(repoRoot: string): Array<{path: string, lang: string}>` — repo-relative,
+    forward-slash paths for the working tree: tracked plus untracked-but-not-ignored
+    (`git ls-files --cached --others --exclude-standard`). Outside a git repository it falls
+    back to a filesystem walk, which later tasks depend on because their tests build fixture
+    repos with `fs.mkdtempSync` and never run `git init`.
   - `findEntrypoints(repoRoot: string): string[]`
   - `detectLanguages(repoRoot: string): Array<{lang: string, files: number}>`
 
@@ -416,6 +420,7 @@ Create `scripts/lib/graph/detector.js`:
 
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const EXTENSIONS = {
   '.ts': 'typescript',
@@ -462,7 +467,38 @@ function walk(dir, repoRoot, acc) {
   return acc;
 }
 
+// Working-tree files git would keep: tracked plus untracked-but-not-ignored.
+// Returns null when repoRoot is not a git repository.
+function gitListFiles(repoRoot) {
+  const result = spawnSync(
+    'git',
+    ['-C', repoRoot, 'ls-files', '--cached', '--others', '--exclude-standard'],
+    { encoding: 'utf8' }
+  );
+  if (result.status !== 0 || typeof result.stdout !== 'string') return null;
+  return result.stdout.split('\n').filter(Boolean);
+}
+
+function isSkipped(relPath) {
+  return relPath.split('/').some(segment => SKIP_DIRS.has(segment));
+}
+
 function listSourceFiles(repoRoot) {
+  const tracked = gitListFiles(repoRoot);
+  if (tracked) {
+    const seen = new Set();
+    const files = [];
+    for (const rel of tracked) {
+      if (seen.has(rel) || isSkipped(rel)) continue;
+      const lang = languageForFile(rel);
+      if (!lang) continue;
+      if (!fs.existsSync(path.join(repoRoot, rel))) continue;
+      seen.add(rel);
+      files.push({ path: rel, lang });
+    }
+    return files;
+  }
+  // Not a git repository (temp fixture dirs in tests): fall back to a filesystem walk.
   return walk(repoRoot, repoRoot, []);
 }
 
