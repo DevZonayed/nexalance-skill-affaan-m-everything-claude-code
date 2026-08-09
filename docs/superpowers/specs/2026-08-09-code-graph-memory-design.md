@@ -58,9 +58,17 @@ rebuildable from them.
 
 ## Constraints
 
-- No native compilation. Parsing uses WASM tree-sitter (`web-tree-sitter` plus
-  `.wasm` grammar files), matching the existing `sql.js` precedent. `npm install`
-  must continue to work with no compiler toolchain on Windows, macOS and Linux.
+- No native compilation. Parsing uses WASM tree-sitter, matching the existing
+  `sql.js` precedent. `npm install` must continue to work with no compiler
+  toolchain on Windows, macOS and Linux.
+- **Pinned, verified dependency pair:** `web-tree-sitter@0.22.6` plus
+  `tree-sitter-wasms@0.1.13` (grammar ABI 14). This exact pair was probed on
+  2026-08-09: all four target grammars load, parse and answer queries. Newer
+  runtimes are **not** drop-in — `web-tree-sitter@0.26.12` fails to load these
+  grammars with a `getDylinkMetadata` error, because `tree-sitter-wasms` builds
+  its `.wasm` files with `tree-sitter-cli@0.20.x` and the Emscripten dylink
+  format has since changed. Both versions must be upgraded together, behind the
+  parser fixture suite.
 - Node >= 18, CommonJS, no transpilation, consistent with `.claude/rules/node.md`.
 - No model is invoked at any point in building, updating, or querying the index.
 - The index is disposable. Deleting `.ecc/graph/` must never lose information
@@ -132,9 +140,13 @@ never writes shards except through `store`'s heal path. A new language is a new
 2. It resolves candidate refs (typically one to three files).
 3. For each candidate file it stats and hashes the file on disk.
 4. Hash matches stored hash — answer is returned.
-5. Hash differs — `store` reparses that single file (single-digit milliseconds),
-   updates its shard and the indexes, appends any events, then answers from the
-   healed data.
+5. Hash differs — `store` reparses that single file, updates its shard and the
+   indexes, appends any events, then answers from the healed data.
+
+Measured on this repository (46 files, 434 KB of `scripts/lib/*.js`, 2026-08-09):
+parse and symbol extraction cost **4.45 ms mean per file, 19.7 ms worst case**.
+A 600-file full build is therefore roughly **2.7 s of parse time**, plus I/O and
+index serialisation. Single-file heal is imperceptible inside a CLI invocation.
 
 This is what makes a confidently wrong answer structurally impossible: an answer
 is only ever emitted from a shard whose hash was verified against disk in the
@@ -422,6 +434,15 @@ These do not block implementation and are deliberately deferred.
 - Which additional language is added first after v1, and whether grammar `.wasm`
   files should be bundled in the npm package or downloaded on first build. v1
   bundles them; the package-size impact is roughly 6–8 MB.
+- How to move off the pinned `web-tree-sitter@0.22.6`. The current runtime is
+  0.26.x, so v1 ships a deliberately old parser runtime. The upgrade requires a
+  grammar source built against a matching Emscripten dylink format — either a
+  newer prebuilt-grammar package, or building `.wasm` grammars with
+  `tree-sitter-cli` at package-publish time. The latter keeps installs
+  compiler-free but adds an Emscripten toolchain to the maintainer's release
+  process. This is not urgent: grammar ABI 14 parses these four languages
+  correctly today, and the parser fixture suite will catch any regression on
+  upgrade.
 
 ## Handoff
 
