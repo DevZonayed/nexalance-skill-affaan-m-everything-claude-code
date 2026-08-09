@@ -89,6 +89,107 @@ async function buildShard(repoRoot, relPath, lang, rev) {
   return base;
 }
 
+function buildIndexes(shards) {
+  const symbols = {};
+  const kinds = {};
+  const out = {};
+  const incoming = {};
+
+  for (const shard of shards) {
+    if (shard.status !== 'indexed') continue;
+
+    for (const symbol of shard.symbols || []) {
+      const ref = {
+        path: shard.path,
+        line: symbol.line,
+        kind: symbol.kind,
+        exported: Boolean(symbol.exported),
+      };
+      if (!symbols[symbol.name]) symbols[symbol.name] = [];
+      symbols[symbol.name].push(ref);
+
+      if (!kinds[symbol.kind]) kinds[symbol.kind] = [];
+      kinds[symbol.kind].push({
+        path: shard.path,
+        line: symbol.line,
+        name: symbol.name,
+        label: symbol.label || null,
+      });
+    }
+
+    const targets = (shard.imports || [])
+      .map(imp => imp.resolved)
+      .filter(Boolean);
+    if (targets.length) {
+      out[shard.path] = [...new Set(targets)].sort();
+      for (const target of out[shard.path]) {
+        if (!incoming[target]) incoming[target] = [];
+        if (!incoming[target].includes(shard.path)) incoming[target].push(shard.path);
+      }
+    }
+  }
+
+  for (const key of Object.keys(incoming)) incoming[key].sort();
+
+  return {
+    symbols: { schema: 'ecc.graph.symbols.v1', symbols },
+    kinds: { schema: 'ecc.graph.kinds.v1', kinds },
+    edges: { schema: 'ecc.graph.edges.v1', out, in: incoming },
+  };
+}
+
+function indexPath(dir, name) {
+  return path.join(dir, 'index', `${name}.json`);
+}
+
+function writeIndexes(dir, indexes) {
+  for (const name of ['symbols', 'kinds', 'edges']) {
+    writeFileAtomic(indexPath(dir, name), `${JSON.stringify(indexes[name], null, 2)}\n`);
+  }
+}
+
+function readIndex(dir, name) {
+  try {
+    return JSON.parse(fs.readFileSync(indexPath(dir, name), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function buildManifest(input) {
+  const shards = input.shards || [];
+  const indexed = shards.filter(s => s.status === 'indexed');
+  const symbolCount = indexed.reduce((n, s) => n + (s.symbols || []).length, 0);
+  const edgeCount = indexed.reduce(
+    (n, s) => n + (s.imports || []).filter(i => i.resolved).length, 0
+  );
+  return {
+    schema: 'ecc.graph.manifest.v1',
+    rev: input.rev,
+    built_at: new Date().toISOString(),
+    git_sha: input.gitSha || null,
+    languages: input.languages || [],
+    entrypoints: input.entrypoints || [],
+    counts: { files: indexed.length, symbols: symbolCount, edges: edgeCount },
+    unindexed: {
+      unsupported: input.unsupportedCount || 0,
+      parse_error: shards.filter(s => s.status === 'parse_error').length,
+    },
+  };
+}
+
+function writeManifest(dir, manifest) {
+  writeFileAtomic(path.join(dir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function readManifest(dir) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
 module.exports = {
   SCHEMA,
   graphDir,
@@ -98,4 +199,10 @@ module.exports = {
   readShard,
   resolveImport,
   buildShard,
+  buildIndexes,
+  writeIndexes,
+  readIndex,
+  buildManifest,
+  writeManifest,
+  readManifest,
 };
