@@ -107,3 +107,6 @@ ecc2/target/
 assets/images/security/badrudi-exploit.mp4
 
 .aider*
+
+# Generated code graph index (rebuildable via: ecc graph build)
+.ecc/graph/

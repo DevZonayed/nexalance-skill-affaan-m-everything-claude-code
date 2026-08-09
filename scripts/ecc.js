@@ -43,6 +43,10 @@ const COMMANDS = {
     script: 'memory.js',
     description: 'Share durable context across Claude, Codex, Hermes, and other harnesses',
   },
+  graph: {
+    script: 'graph.js',
+    description: 'Query the local code graph index instead of reading source files',
+  },
   'install-plan': {
     script: 'install-plan.js',
     description: 'Alias for plan',
@@ -111,6 +115,7 @@ const PRIMARY_COMMANDS = [
   'control-pane',
   'ito',
   'memory',
+  'graph',
   'list-installed',
   'doctor',
   'feedback',

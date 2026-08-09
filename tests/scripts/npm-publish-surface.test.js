@@ -77,6 +77,7 @@ function buildExpectedPublishPaths(repoRoot) {
     "scripts/uninstall.js",
     "scripts/welcome.js",
     "scripts/gemini-adapt-agents.js",
+    "scripts/graph.js",
     "scripts/sync-ecc-to-codex.sh",
     "scripts/codex/check-plugin-cache.js",
     "scripts/codex/merge-codex-config.js",
