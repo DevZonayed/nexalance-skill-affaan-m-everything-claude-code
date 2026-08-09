@@ -245,14 +245,21 @@ Expected: PASS, 7 passed / 0 failed.
 
 If any grammar reports a version other than 14, **stop** — the dependency pair has drifted. Do not proceed; re-pin per the Global Constraints.
 
-- [ ] **Step 6: Add the grammar assets to the published package**
+- [ ] **Step 6: Do NOT touch the `files` array yet**
 
-In `package.json`, inside the `files` array, add these two entries so the CLI works when installed from npm:
+`tests/scripts/npm-publish-surface.test.js` derives the expected `files` array from the
+actual module graph and fails on any entry that is not yet reachable from a published
+entry point. At this task neither `scripts/graph.js` (does not exist) nor
+`scripts/lib/graph/` (not yet reachable) may be listed. Both are added in Task 10,
+once `scripts/graph.js` exists and is registered in `scripts/ecc.js`.
 
+Verify the surface is still green before committing:
+
+```bash
+node tests/scripts/npm-publish-surface.test.js
 ```
-"scripts/graph.js",
-"scripts/lib/graph/",
-```
+
+Expected: `Failed: 0`.
 
 - [ ] **Step 7: Commit**
 
@@ -3044,6 +3051,25 @@ Append to `.gitignore`:
 # Generated code graph index (rebuildable via: ecc graph build)
 .ecc/graph/
 ```
+
+- [ ] **Step 6b: Add the graph runtime to the published package**
+
+Now that `scripts/graph.js` exists and is reachable from `scripts/ecc.js`, add both
+entries to the `files` array in `package.json`, keeping the array's existing ordering:
+
+```
+"scripts/graph.js",
+"scripts/lib/graph/",
+```
+
+Then confirm the publish surface agrees with the module graph:
+
+```bash
+node tests/scripts/npm-publish-surface.test.js
+```
+
+Expected: `Failed: 0`. If it reports a mismatch, add exactly the entries the assertion
+diff names — that test is the source of truth for this array, not this plan.
 
 - [ ] **Step 7: Run the tests and make sure they pass**
 
