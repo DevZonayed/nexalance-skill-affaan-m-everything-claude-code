@@ -114,12 +114,12 @@ function runTests() {
             'post:ecc-metrics-bridge',
             'post:ecc-context-monitor'
           ],
-          async: ['post:quality-gate', 'post:observe:continuous-learning']
+          async: ['post:quality-gate', 'post:observe:continuous-learning', 'post:graph-update']
         },
         {
           tool: 'Write',
           sync: ['post:edit:design-quality-check', 'post:edit:accumulator', 'post:governance-capture', 'post:session-activity-tracker', 'post:ecc-metrics-bridge', 'post:ecc-context-monitor'],
-          async: ['post:quality-gate', 'post:observe:continuous-learning']
+          async: ['post:quality-gate', 'post:observe:continuous-learning', 'post:graph-update']
         },
         {
           tool: 'Bash',
@@ -173,7 +173,8 @@ function runTests() {
         'post:ecc-metrics-bridge',
         'post:ecc-context-monitor',
         'post:quality-gate',
-        'post:observe:continuous-learning'
+        'post:observe:continuous-learning',
+        'post:graph-update'
       ]);
     })
   )
