@@ -3101,13 +3101,17 @@ Append to `.gitignore`:
 
 - [ ] **Step 6b: Add the graph runtime to the published package**
 
-Now that `scripts/graph.js` exists and is reachable from `scripts/ecc.js`, add both
-entries to the `files` array in `package.json`, keeping the array's existing ordering:
+Now that `scripts/graph.js` exists and is reachable from `scripts/ecc.js`, add exactly
+one entry to the `files` array in `package.json`, keeping the array's existing ordering:
 
 ```
 "scripts/graph.js",
-"scripts/lib/graph/",
 ```
+
+Do **not** add `"scripts/lib/graph/"`. The array already lists `scripts/lib/`, which
+covers the whole subtree — verified with `npm pack --dry-run`, which ships all 12 graph
+modules. A redundant entry makes `npm-publish-surface.test.js` fail, because it asserts
+the array matches the derived module graph exactly.
 
 Then confirm the publish surface agrees with the module graph:
 
