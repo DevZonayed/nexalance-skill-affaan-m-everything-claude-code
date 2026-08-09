@@ -47,8 +47,32 @@ function runTests() {
     assert.strictEqual(r.kind, 'test');
   })) passed++; else failed++;
 
+  // Regression: a file-wide #[test] scan tagged every symbol in the file as a test.
+  if (test('does NOT tag a rust type as a test just because the file has tests', () => {
+    const source = [
+      'pub enum PaneLayout {',   // line 1 — the symbol under test
+      '    Split,',
+      '}',
+      '',
+      '#[cfg(test)]',
+      'mod tests {',
+      '    #[test]',
+      '    fn works() {}',
+      '}',
+    ].join('\n');
+    const r = kinds.refineKind(
+      sym({ name: 'PaneLayout', kind: 'enum', line: 1 }),
+      { lang: 'rust', relPath: 'ecc2/src/config/mod.rs', source }
+    );
+    assert.strictEqual(r.kind, 'enum', `expected enum, got ${r.kind}`);
+  })) passed++; else failed++;
+
   if (test('detects a rust test by attribute', () => {
-    const r = kinds.refineKind(sym({ name: 'works' }), { lang: 'rust', relPath: 'src/lib.rs', source: '#[test]\nfn works() {}' });
+    // `fn works()` is on line 2; the #[test] attribute directly precedes it.
+    const r = kinds.refineKind(
+      sym({ name: 'works', line: 2 }),
+      { lang: 'rust', relPath: 'src/lib.rs', source: '#[test]\nfn works() {}' }
+    );
     assert.strictEqual(r.kind, 'test');
   })) passed++; else failed++;
 

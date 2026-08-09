@@ -1468,7 +1468,9 @@ const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$|_test\.go$|test_.*\.py$/i;
 
 function looksLikeTest(symbol, ctx) {
   if (TEST_PATH.test(ctx.relPath) || TEST_FILE.test(ctx.relPath)) return true;
-  if (ctx.lang === 'rust' && /#\[test\]/.test(ctx.source || '')) return true;
+  // Must be per-symbol. A file-wide scan tags every struct in a module that
+  // merely contains a #[cfg(test)] block as a test.
+  if (ctx.lang === 'rust' && rustSymbolIsTest(symbol, ctx.source)) return true;
   if (ctx.lang === 'python' && /^test_/.test(symbol.name)) return true;
   if (ctx.lang === 'go' && /^Test[A-Z]/.test(symbol.name)) return true;
   return false;

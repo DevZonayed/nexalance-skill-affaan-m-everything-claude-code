@@ -15,9 +15,24 @@ function isHeuristic(kind) {
 const TEST_PATH = /(^|\/)(tests?|__tests__|spec)\//i;
 const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$|_test\.go$|test_.*\.py$/i;
 
+// A Rust symbol is a test only when a #[test]-style attribute precedes IT.
+// Checking the whole file marked every struct in a module containing a test
+// block as a test — e.g. `pub enum PaneLayout` in ecc2/src/config/mod.rs.
+function rustSymbolIsTest(symbol, source) {
+  const lines = String(source || '').split('\n');
+  for (let i = symbol.line - 2; i >= 0 && i >= symbol.line - 8; i--) {
+    const line = (lines[i] || '').trim();
+    if (!line || line.startsWith('//')) continue;
+    if (/^#\[\s*(tokio::)?test\b/.test(line)) return true;
+    if (line.startsWith('#[')) continue;
+    break;
+  }
+  return false;
+}
+
 function looksLikeTest(symbol, ctx) {
   if (TEST_PATH.test(ctx.relPath) || TEST_FILE.test(ctx.relPath)) return true;
-  if (ctx.lang === 'rust' && /#\[test\]/.test(ctx.source || '')) return true;
+  if (ctx.lang === 'rust' && rustSymbolIsTest(symbol, ctx.source)) return true;
   if (ctx.lang === 'python' && /^test_/.test(symbol.name)) return true;
   if (ctx.lang === 'go' && /^Test[A-Z]/.test(symbol.name)) return true;
   return false;
