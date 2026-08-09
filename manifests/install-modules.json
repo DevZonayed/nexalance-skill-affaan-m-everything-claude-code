@@ -311,6 +311,7 @@
         "skills/agent-introspection-debugging",
         "skills/ai-regression-testing",
         "skills/configure-ecc",
+        "skills/code-graph",
         "skills/code-tour",
         "skills/continuous-learning",
         "skills/continuous-learning-v2",

@@ -572,6 +572,25 @@ function summarizeLearnedSkills(learnedDir, learnedSkillFiles = collectLearnedSk
   ].join('\n');
 }
 
+/**
+ * Resolve the one-line code graph pointer for the current repo.
+ *
+ * Returns an empty string when no index exists, or when the graph module is
+ * unavailable or throws — session start must never fail because of the graph.
+ *
+ * @returns {Promise<string>} The status line, or '' when nothing to inject.
+ */
+async function getGraphStatusLine() {
+  try {
+    const graphQuery = require('../lib/graph/query');
+    const result = await graphQuery.status(process.env.CLAUDE_PROJECT_DIR || process.cwd());
+    return result.code === graphQuery.EXIT.ANSWERED && result.line ? result.line : '';
+  } catch {
+    // Graph module unavailable; session start must not fail.
+    return '';
+  }
+}
+
 async function main() {
   const sessionsDir = getSessionsDir();
   const sessionSearchDirs = getSessionSearchDirs();
@@ -724,6 +743,16 @@ async function main() {
     }
   } else {
     log('[SessionStart] No specific project type detected');
+  }
+
+  // Code graph pointer: ~40 tokens, emitted only when an index exists.
+  // Injected as additional context rather than written to stdout, because this
+  // hook's stdout carries a single JSON payload that raw output would corrupt.
+  if (shouldInjectContext) {
+    const graphLine = await getGraphStatusLine();
+    if (graphLine) {
+      additionalContextParts.push(graphLine);
+    }
   }
 
   const additionalContext = shouldInjectContext
