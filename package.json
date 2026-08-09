@@ -468,7 +468,9 @@
   "dependencies": {
     "@iarna/toml": "2.2.5",
     "ajv": "8.20.0",
-    "sql.js": "1.14.1"
+    "sql.js": "1.14.1",
+    "tree-sitter-wasms": "0.1.13",
+    "web-tree-sitter": "0.22.6"
   },
   "devDependencies": {
     "@eslint/js": "9.39.2",
