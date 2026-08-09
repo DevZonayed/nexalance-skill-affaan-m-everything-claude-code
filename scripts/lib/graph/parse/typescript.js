@@ -45,6 +45,30 @@ function collectCalls(node) {
   return [...calls];
 }
 
+// Names bound by a CommonJS `const { a, b } = require('x')`; empty for a
+// namespace binding such as `const x = require('x')`.
+function requireBindings(callNode) {
+  let current = callNode.parent;
+  while (current && current.type !== 'variable_declarator' &&
+         current.type !== 'expression_statement' && current.type !== 'program') {
+    current = current.parent;
+  }
+  if (!current || current.type !== 'variable_declarator') return [];
+  const nameNode = current.childForFieldName('name');
+  if (!nameNode || nameNode.type !== 'object_pattern') return [];
+  const names = [];
+  for (let i = 0; i < nameNode.namedChildCount; i++) {
+    const child = nameNode.namedChild(i);
+    if (child.type === 'shorthand_property_identifier_pattern') {
+      names.push(child.text);
+    } else if (child.type === 'pair_pattern') {
+      const key = child.childForFieldName('key');
+      if (key) names.push(key.text);
+    }
+  }
+  return names;
+}
+
 function signatureOf(node) {
   const params = node.childForFieldName('parameters');
   const ret = node.childForFieldName('return_type');
@@ -101,6 +125,24 @@ async function parseSource(lang, source) {
           line: node.startPosition.row + 1,
           external: !from.startsWith('.'),
         });
+      }
+    }
+
+    if (node.type === 'call_expression') {
+      const fn = node.childForFieldName('function');
+      const args = node.childForFieldName('arguments');
+      if (fn && fn.text === 'require' && args && args.namedChildCount === 1 &&
+          args.namedChild(0).type === 'string') {
+        const from = args.namedChild(0).text.slice(1, -1);
+        if (from) {
+          imports.push({
+            from,
+            resolved: null,
+            symbols: requireBindings(node),
+            line: node.startPosition.row + 1,
+            external: !from.startsWith('.'),
+          });
+        }
       }
     }
 
