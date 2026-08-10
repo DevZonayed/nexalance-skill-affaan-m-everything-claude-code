@@ -39,6 +39,10 @@ const COMMANDS = {
     script: 'ito.js',
     description: 'Invoke the separately installed canonical Itô compute CLI',
   },
+  soul: {
+    script: 'soul.js',
+    description: "Record and inspect ECC's own model of how the operator works",
+  },
   memory: {
     script: 'memory.js',
     description: 'Share durable context across Claude, Codex, Hermes, and other harnesses',
@@ -115,6 +119,7 @@ const PRIMARY_COMMANDS = [
   'control-pane',
   'ito',
   'memory',
+  'soul',
   'graph',
   'list-installed',
   'doctor',

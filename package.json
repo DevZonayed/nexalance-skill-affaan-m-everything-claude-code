@@ -132,6 +132,7 @@
     "scripts/sessions-cli.js",
     "scripts/setup-package-manager.js",
     "scripts/skill-create-output.js",
+    "scripts/soul.js",
     "scripts/status.js",
     "scripts/sync-ecc-to-codex.sh",
     "scripts/work-items.js",
