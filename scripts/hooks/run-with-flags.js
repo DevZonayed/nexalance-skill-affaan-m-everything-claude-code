@@ -11,7 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
-const { isHookEnabled } = require('../lib/hook-flags');
+const { isHookEnabled, isDryRun } = require('../lib/hook-flags');
 const { buildPreToolUseAdditionalContext } = require('./pretooluse-visible-output');
 
 const MAX_STDIN = 1024 * 1024;
@@ -46,17 +46,26 @@ function writeStderr(stderr) {
 }
 
 /**
- * Write stdout fully, then exit. `process.exit()` immediately after
- * `process.stdout.write()` drops anything beyond the ~64KB pipe buffer,
- * which cut large pass-through payloads mid-JSON and made the harness
- * treat the hook as failed (#2222). The write callback fires only after
- * the chunk is flushed to the pipe.
+ * Exit only after stdout and any previously queued stderr have drained.
+ * `process.exit()` immediately after a stream write drops anything beyond
+ * the OS pipe buffer, which cut large hook output mid-payload and made the
+ * harness treat the hook as failed (#2222).
  */
 function exitWithStdout(text, exitCode) {
-  if (typeof text !== 'string' || text.length === 0) {
-    process.exit(exitCode);
+  process.exitCode = exitCode;
+  let pendingWrites = 1;
+  const exitWhenFlushed = () => {
+    pendingWrites -= 1;
+    if (pendingWrites === 0) {
+      process.exit(exitCode);
+    }
+  };
+
+  if (typeof text === 'string' && text.length > 0) {
+    pendingWrites += 1;
+    process.stdout.write(text, exitWhenFlushed);
   }
-  process.stdout.write(text, () => process.exit(exitCode));
+  process.stderr.write('', exitWhenFlushed);
 }
 
 function resolveHookResult(raw, output) {
@@ -100,6 +109,47 @@ function getPluginRoot() {
   return path.resolve(__dirname, '..', '..');
 }
 
+//Safely extract target context from hook stdin JSON for dry-run preview.
+
+function extractTargetContext(raw) {
+  const result = { tool: '', filePath: '', command: '' };
+  if (!raw || typeof raw !== 'string') return result;
+
+  try {
+    const payload = JSON.parse(raw);
+    if (payload && typeof payload === 'object') {
+      result.tool = String(payload.tool || '');
+      const input = payload.tool_input;
+      if (input && typeof input === 'object') {
+        result.filePath = String(input.file_path || input.path || '');
+        result.command = String(input.command || '');
+      }
+    }
+  } catch {
+    // best-effort field extraction; ignore malformed input
+  }
+  return result;
+}
+
+// Build the [DryRun] preview line for stderr.
+
+function buildDryRunPreview(hookId, relScriptPath, profilesCsv, raw) {
+  const ctx = extractTargetContext(raw);
+  const parts = [`[DryRun] Hook "${hookId}" would execute: ${relScriptPath}`, `(enabled=true, profiles=${profilesCsv || 'default'})`];
+
+  if (ctx.tool) {
+    parts.push(`tool=${ctx.tool}`);
+  }
+  if (ctx.filePath) {
+    parts.push(`target=${ctx.filePath}`);
+  }
+  if (ctx.command) {
+    parts.push(`command=${ctx.command}`);
+  }
+
+  return parts.join(' ') + '\n';
+}
+
 async function main() {
   const [, , hookId, relScriptPath, profilesCsv] = process.argv;
   const { raw, truncated } = await readStdinRaw();
@@ -121,6 +171,13 @@ async function main() {
   }
 
   if (!isHookEnabled(hookId, { profiles: profilesCsv })) {
+    exitWithStdout(sanitizeEcho(raw), 0);
+    return;
+  }
+
+  if (isDryRun()) {
+    const preview = buildDryRunPreview(hookId, relScriptPath, profilesCsv, raw);
+    process.stderr.write(preview);
     exitWithStdout(sanitizeEcho(raw), 0);
     return;
   }

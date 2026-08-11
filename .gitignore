@@ -99,7 +99,17 @@ ecc2/target/
 # Generated lock files in tool subdirectories
 .opencode/package-lock.json
 .opencode/node_modules/
+
+# yarn is the canonical package manager for this repo (see package.json
+# "packageManager"); ignore stray lockfiles from running another manager locally
+/bun.lock
+/bun.lockb
 assets/images/security/badrudi-exploit.mp4
 branch_structure.json
 temp_auto_push.bat
 temp_interactive_push.bat
+
+.aider*
+
+# Generated code graph index (rebuildable via: ecc graph build)
+.ecc/graph/
