@@ -24,11 +24,13 @@ const { spawnSync } = require('child_process');
 
 const repoRoot = path.join(__dirname, '..', '..');
 const runner = path.join(repoRoot, 'scripts', 'hooks', 'run-with-flags.js');
-const hooksConfig = JSON.parse(
-  fs.readFileSync(path.join(repoRoot, 'hooks', 'hooks.json'), 'utf8')
-);
+const { readHooksConfig } = require(path.join(repoRoot, 'scripts', 'lib', 'hooks-config.js'));
+const hooksConfig = readHooksConfig(path.join(repoRoot, 'hooks', 'hooks.json'));
 
 const MAX_STDIN = 1024 * 1024;
+const SUBPROCESS_TIMEOUT_MS = process.platform === 'darwin' && process.env.CI === 'true'
+  ? 120_000
+  : 60_000;
 
 const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ecc-stop-stdout-')); // non-git cwd
 const dataHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ecc-stop-data-'));
@@ -75,7 +77,7 @@ function runViaRunner(hookId, script, input) {
     encoding: 'utf8',
     cwd: workDir,
     env: hookEnv(),
-    timeout: 60000,
+    timeout: SUBPROCESS_TIMEOUT_MS,
     maxBuffer: 16 * 1024 * 1024,
     stdio: ['pipe', 'pipe', 'pipe']
   });
@@ -87,7 +89,7 @@ function runDirect(script, input) {
     encoding: 'utf8',
     cwd: workDir,
     env: hookEnv(),
-    timeout: 60000,
+    timeout: SUBPROCESS_TIMEOUT_MS,
     maxBuffer: 16 * 1024 * 1024,
     stdio: ['pipe', 'pipe', 'pipe']
   });
@@ -107,7 +109,7 @@ function runRegisteredStopHook(entry, input, envOverrides = {}) {
     cwd: workDir,
     env,
     shell: true,
-    timeout: 60000,
+    timeout: SUBPROCESS_TIMEOUT_MS,
     maxBuffer: 16 * 1024 * 1024,
     stdio: ['pipe', 'pipe', 'pipe']
   });
@@ -122,6 +124,21 @@ function assertStdoutContract(result, label) {
       assert.fail(`${label}: stdout is non-empty but not valid JSON (${err.message}); first 120 chars: ${result.stdout.slice(0, 120)}`);
     }
   }
+}
+
+function formatSpawnFailure(result, elapsedMs) {
+  const token = value => typeof value === 'string' && /^[A-Z][A-Z0-9_]{0,47}$/.test(value)
+    ? value : null;
+  // Keep decoded UTF-8 byte counts, never stream contents or error messages.
+  const byteCount = value => typeof value === 'string' ? Buffer.byteLength(value, 'utf8') : null;
+  return JSON.stringify({
+    elapsedMs: Number.isSafeInteger(elapsedMs) && elapsedMs >= 0 ? elapsedMs : null,
+    status: Number.isSafeInteger(result.status) ? result.status : null,
+    signal: token(result.signal),
+    errorCode: token(result.error && result.error.code),
+    stdoutBytes: byteCount(result.stdout),
+    stderrBytes: byteCount(result.stderr)
+  });
 }
 
 // All registered Stop hooks (hooks/hooks.json).
@@ -139,7 +156,6 @@ const STOP_HOOKS = [
 // Direct-invocation legacy paths that echo stdin.
 const ECHOING_STOP_HOOKS = [
   'scripts/hooks/stop-format-typecheck.js',
-  'scripts/hooks/check-console-log.js',
   'scripts/hooks/cost-tracker.js',
   'scripts/hooks/desktop-notify.js'
 ];
@@ -161,11 +177,13 @@ const realisticPayload = stopPayload(100 * 1024);
 for (const entry of hooksConfig.hooks.Stop) {
   if (
     test(`${entry.id} registered wrapper flushes a 100KB Stop payload`, () => {
+      const startedAt = process.hrtime.bigint();
       const result = runRegisteredStopHook(entry, realisticPayload);
+      const elapsedMs = Math.round(Number(process.hrtime.bigint() - startedAt) / 1e6);
       assert.strictEqual(
         result.status,
         0,
-        `${entry.id}: expected exit 0, got ${result.status}: ${result.stderr}`
+        result.status === 0 ? undefined : `${entry.id}: expected exit 0; ${formatSpawnFailure(result, elapsedMs)}`
       );
       assert.ok(
         result.stdout === realisticPayload,
@@ -181,6 +199,21 @@ for (const entry of hooksConfig.hooks.Stop) {
 const representativeStopEntry = hooksConfig.hooks.Stop.find(
   entry => entry.id === 'stop:cost-tracker'
 );
+const CALLBACK_FLUSH_WRAPPER = 'const finish=(out,err,code)=>{let pending=1;const done=()=>{pending-=1;if(pending===0)process.exit(code);};if(out){pending+=1;process.stdout.write(out,done);}if(err){pending+=1;process.stderr.write(err,done);}process.nextTick(done);};';
+
+if (
+  test('all registered Stop wrappers keep the large-output flush contract', () => {
+    for (const entry of hooksConfig.hooks.Stop) {
+      assert.match(entry.hooks[0].command, /maxBuffer:16\*1024\*1024/);
+      assert.ok(
+        entry.hooks[0].command.includes(CALLBACK_FLUSH_WRAPPER),
+        `${entry.id}: wrapper must wait for stdout and stderr callbacks before exiting`
+      );
+    }
+  })
+)
+  passed++;
+else failed++;
 
 if (
   test('registered Stop wrapper flushes a 100KB dry-run payload', () => {
@@ -206,25 +239,26 @@ const multibytePayload = stopPayload(400 * 1024, '한');
 assert.ok(multibytePayload.length < MAX_STDIN, 'fixture must stay below the runner character cap');
 assert.ok(Buffer.byteLength(multibytePayload) > MAX_STDIN, 'fixture must exceed the default byte buffer');
 
-for (const entry of hooksConfig.hooks.Stop) {
-  if (
-    test(`${entry.id} registered wrapper preserves a multibyte sub-cap payload`, () => {
-      const result = runRegisteredStopHook(entry, multibytePayload);
-      assert.strictEqual(
-        result.status,
-        0,
-        `${entry.id}: expected exit 0, got ${result.status}: ${result.stderr}`
-      );
-      assert.ok(
-        result.stdout === multibytePayload,
-        `${entry.id}: registered wrapper must echo ${Buffer.byteLength(multibytePayload)} bytes uncut (got ${Buffer.byteLength(result.stdout)})`
-      );
-      JSON.parse(result.stdout);
-    })
-  )
-    passed++;
-  else failed++;
-}
+// Every registered command uses the same generated wrapper, verified above.
+// Exercise the multi-megabyte byte-buffer edge once so the test does not
+// amplify hosted-runner load by serializing the identical payload seven times.
+if (
+  test('registered Stop wrapper preserves a multibyte sub-cap payload', () => {
+    const result = runRegisteredStopHook(representativeStopEntry, multibytePayload);
+    assert.strictEqual(
+      result.status,
+      0,
+      `expected exit 0, got ${result.status}: ${result.stderr}`
+    );
+    assert.ok(
+      result.stdout === multibytePayload,
+      `registered wrapper must echo ${Buffer.byteLength(multibytePayload)} bytes uncut (got ${Buffer.byteLength(result.stdout)})`
+    );
+    JSON.parse(result.stdout);
+  })
+)
+  passed++;
+else failed++;
 
 for (const [hookId, script] of STOP_HOOKS) {
   if (
@@ -259,25 +293,19 @@ if (
   passed++;
 else failed++;
 
-for (const entry of hooksConfig.hooks.Stop) {
-  if (
-    test(`${entry.id} registered wrapper suppresses a >1MB Stop payload`, () => {
-      const result = runRegisteredStopHook(entry, oversizedPayload);
-      assert.strictEqual(
-        result.status,
-        0,
-        `${entry.id}: expected exit 0, got ${result.status}: ${result.stderr}`
-      );
-      assert.strictEqual(
-        result.stdout.length,
-        0,
-        `${entry.id}: wrapper must preserve oversized-input suppression (got ${result.stdout.length} characters)`
-      );
-    })
-  )
-    passed++;
-  else failed++;
-}
+if (
+  test('registered Stop wrapper suppresses a >1MB Stop payload', () => {
+    const result = runRegisteredStopHook(representativeStopEntry, oversizedPayload);
+    assert.strictEqual(result.status, 0, `expected exit 0, got ${result.status}: ${result.stderr}`);
+    assert.strictEqual(
+      result.stdout.length,
+      0,
+      `wrapper must preserve oversized-input suppression (got ${result.stdout.length} characters)`
+    );
+  })
+)
+  passed++;
+else failed++;
 
 for (const [hookId, script] of [...STOP_HOOKS, ['stop:desktop-notify', 'scripts/hooks/desktop-notify.js']]) {
   if (
@@ -302,6 +330,17 @@ for (const script of ECHOING_STOP_HOOKS) {
     passed++;
   else failed++;
 }
+
+if (
+  test('check-console-log invoked directly echoes a >1MB payload uncut', () => {
+    const result = runDirect('scripts/hooks/check-console-log.js', oversizedPayload);
+    assert.strictEqual(result.status, 0);
+    assert.strictEqual(result.stdout, oversizedPayload, 'direct pass-through must preserve the complete payload');
+    JSON.parse(result.stdout);
+  })
+)
+  passed++;
+else failed++;
 
 if (
   test('check-console-log invoked directly echoes a sub-cap >64KB payload uncut', () => {
