@@ -213,13 +213,19 @@ function runCatalogValidator(overrides = {}) {
 // Captures stderr on both success and failure (the shared
 // runSourceViaTempFile helper only surfaces stderr when the child
 // exits non-zero, which hides WARN lines in the default mode).
-function runSkillsValidator(testDir, argv = [], envOverrides = {}) {
+function runSkillsValidator(testDir, argv = [], envOverrides = {}, docsDir) {
   const validatorPath = path.join(validatorsDir, 'validate-skills.js');
   let source = fs.readFileSync(validatorPath, 'utf8');
   source = stripShebang(source);
   source = source.replace(
     /const SKILLS_DIR = .*?;/,
     `const SKILLS_DIR = ${JSON.stringify(testDir)};`,
+  );
+  // Default to a nonexistent docs root so tests exercising only
+  // SKILLS_DIR aren't polluted by this repo's real docs/*/skills/ tree.
+  source = source.replace(
+    /const DOCS_DIR = .*?;/,
+    `const DOCS_DIR = ${JSON.stringify(docsDir || '/nonexistent-docs-dir-for-tests')};`,
   );
   if (argv.length > 0) {
     const argvPreamble = argv
@@ -693,7 +699,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        InvalidEventType: [{ matcher: 'test', hooks: [{ type: 'command', command: 'echo hi' }] }]
+        InvalidEventType: [{ id: 'test:invalid-event', matcher: 'test', hooks: [{ type: 'command', command: 'echo hi' }] }]
       }
     }));
 
@@ -708,7 +714,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ command: 'echo hi' }] }]
+        PreToolUse: [{ id: 'test:missing-type', matcher: 'test', hooks: [{ command: 'echo hi' }] }]
       }
     }));
 
@@ -723,7 +729,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command' }] }]
+        PreToolUse: [{ id: 'test:missing-command', matcher: 'test', hooks: [{ type: 'command' }] }]
       }
     }));
 
@@ -738,7 +744,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command', command: 'echo', async: 'yes' }] }]
+        PreToolUse: [{ id: 'test:invalid-async', matcher: 'test', hooks: [{ type: 'command', command: 'echo', async: 'yes' }] }]
       }
     }));
 
@@ -753,7 +759,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command', command: 'echo', timeout: -5 }] }]
+        PreToolUse: [{ id: 'test:negative-timeout', matcher: 'test', hooks: [{ type: 'command', command: 'echo', timeout: -5 }] }]
       }
     }));
 
@@ -768,7 +774,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command', command: 'node -e "function {"' }] }]
+        PreToolUse: [{ id: 'test:invalid-inline-js', matcher: 'test', hooks: [{ type: 'command', command: 'node -e "function {"' }] }]
       }
     }));
 
@@ -783,7 +789,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command', command: 'node -e "console.log(1+2)"' }] }]
+        PreToolUse: [{ id: 'test:valid-inline-js', matcher: 'test', hooks: [{ type: 'command', command: 'node -e "console.log(1+2)"' }] }]
       }
     }));
 
@@ -797,7 +803,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command', command: ['node', '-e', 'console.log(1)'] }] }]
+        PreToolUse: [{ id: 'test:array-command', matcher: 'test', hooks: [{ type: 'command', command: ['node', '-e', 'console.log(1)'] }] }]
       }
     }));
 
@@ -823,7 +829,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test' }]
+        PreToolUse: [{ id: 'test:missing-hooks', matcher: 'test' }]
       }
     }));
 
@@ -1390,7 +1396,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command', command: '   \t  ' }] }]
+        PreToolUse: [{ id: 'test:fixture', matcher: 'test', hooks: [{ type: 'command', command: '   \t  ' }] }]
       }
     }));
 
@@ -1405,7 +1411,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command', command: null }] }]
+        PreToolUse: [{ id: 'test:fixture', matcher: 'test', hooks: [{ type: 'command', command: null }] }]
       }
     }));
 
@@ -1420,7 +1426,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command', command: 42 }] }]
+        PreToolUse: [{ id: 'test:fixture', matcher: 'test', hooks: [{ type: 'command', command: 42 }] }]
       }
     }));
 
@@ -1599,7 +1605,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command', command: '' }] }]
+        PreToolUse: [{ id: 'test:fixture', matcher: 'test', hooks: [{ type: 'command', command: '' }] }]
       }
     }));
 
@@ -1614,7 +1620,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command', command: [] }] }]
+        PreToolUse: [{ id: 'test:fixture', matcher: 'test', hooks: [{ type: 'command', command: [] }] }]
       }
     }));
 
@@ -1629,7 +1635,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command', command: ['node', 123, null] }] }]
+        PreToolUse: [{ id: 'test:fixture', matcher: 'test', hooks: [{ type: 'command', command: ['node', 123, null] }] }]
       }
     }));
 
@@ -1644,7 +1650,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 42, command: 'echo hi' }] }]
+        PreToolUse: [{ id: 'test:fixture', matcher: 'test', hooks: [{ type: 42, command: 'echo hi' }] }]
       }
     }));
 
@@ -1659,7 +1665,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command', command: 'echo', timeout: 'fast' }] }]
+        PreToolUse: [{ id: 'test:fixture', matcher: 'test', hooks: [{ type: 'command', command: 'echo', timeout: 'fast' }] }]
       }
     }));
 
@@ -1674,7 +1680,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command', command: 'echo', timeout: 0 }] }]
+        PreToolUse: [{ id: 'test:fixture', matcher: 'test', hooks: [{ type: 'command', command: 'echo', timeout: 0 }] }]
       }
     }));
 
@@ -1688,7 +1694,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     // data.hooks is undefined, so fallback to data itself
     fs.writeFileSync(hooksFile, JSON.stringify({
-      PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command', command: 'echo ok' }] }]
+      PreToolUse: [{ id: 'test:fixture', matcher: 'test', hooks: [{ type: 'command', command: 'echo ok' }] }]
     }));
 
     const result = runValidatorWithDir('validate-hooks', 'HOOKS_FILE', hooksFile);
@@ -1790,7 +1796,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command', command: ['node', '', 'script.js'] }] }]
+        PreToolUse: [{ id: 'test:fixture', matcher: 'test', hooks: [{ type: 'command', command: ['node', '', 'script.js'] }] }]
       }
     }));
 
@@ -1805,7 +1811,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command', command: 'echo hi', timeout: -5 }] }]
+        PreToolUse: [{ id: 'test:fixture', matcher: 'test', hooks: [{ type: 'command', command: 'echo hi', timeout: -5 }] }]
       }
     }));
 
@@ -1820,7 +1826,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PostToolUse: [{ matcher: 'test', hooks: [{ type: 'command', command: 'echo ok', async: 'yes' }] }]
+        PostToolUse: [{ id: 'test:fixture', matcher: 'test', hooks: [{ type: 'command', command: 'echo ok', async: 'yes' }] }]
       }
     }));
 
@@ -1841,7 +1847,7 @@ function runTests() {
     manyHooks.push({ type: 'command', command: '' });
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: manyHooks }]
+        PreToolUse: [{ id: 'test:fixture', matcher: 'test', hooks: manyHooks }]
       }
     }));
 
@@ -1856,7 +1862,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command', command: 'node -e "const x = 1 + 2; process.exit(0)"' }] }]
+        PreToolUse: [{ id: 'test:fixture', matcher: 'test', hooks: [{ type: 'command', command: 'node -e "const x = 1 + 2; process.exit(0)"' }] }]
       }
     }));
 
@@ -1870,9 +1876,9 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command', command: 'echo pre' }] }],
-        PostToolUse: [{ matcher: 'test', hooks: [{ type: 'command', command: 'echo post' }] }],
-        Stop: [{ matcher: 'test', hooks: [{ type: 'command', command: 'echo stop' }] }]
+        PreToolUse: [{ id: 'test:multi-event-pre', matcher: 'test', hooks: [{ type: 'command', command: 'echo pre' }] }],
+        PostToolUse: [{ id: 'test:multi-event-post', matcher: 'test', hooks: [{ type: 'command', command: 'echo post' }] }],
+        Stop: [{ id: 'test:multi-event-stop', matcher: 'test', hooks: [{ type: 'command', command: 'echo stop' }] }]
       }
     }));
 
@@ -2221,7 +2227,7 @@ function runTests() {
     // After unescape chain: var a = "ok"\nconsole.log(a) (real newline) — valid JS
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command',
+        PreToolUse: [{ id: 'test:fixture', matcher: 'test', hooks: [{ type: 'command',
           command: 'node -e "var a = \\"ok\\"\\nconsole.log(a)"' }] }]
       }
     }));
@@ -2237,7 +2243,7 @@ function runTests() {
     // After unescape this becomes: var x = { — missing closing brace
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command',
+        PreToolUse: [{ id: 'test:fixture', matcher: 'test', hooks: [{ type: 'command',
           command: 'node -e "var x = {"' }] }]
       }
     }));
@@ -2421,7 +2427,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: 'test', hooks: [{ type: 'command', command: { run: 'echo hi' } }] }]
+        PreToolUse: [{ id: 'test:fixture', matcher: 'test', hooks: [{ type: 'command', command: { run: 'echo hi' } }] }]
       }
     }));
 
@@ -2440,7 +2446,7 @@ function runTests() {
     // Object format: matcher entry has hooks array but NO matcher field
     fs.writeFileSync(hooksFile, JSON.stringify({
       hooks: {
-        PreToolUse: [{ hooks: [{ type: 'command', command: 'echo ok' }] }]
+        PreToolUse: [{ id: 'test:missing-matcher', hooks: [{ type: 'command', command: 'echo ok' }] }]
       }
     }));
 
@@ -2548,6 +2554,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       PreToolUse: [{
+        id: 'test:round72-async',
         matcher: 'Write',
         hooks: [{
           type: 'command',
@@ -2568,6 +2575,7 @@ function runTests() {
     const hooksFile = path.join(testDir, 'hooks.json');
     fs.writeFileSync(hooksFile, JSON.stringify({
       PostToolUse: [{
+        id: 'test:round72-timeout',
         matcher: 'Edit',
         hooks: [{
           type: 'command',
@@ -2655,8 +2663,8 @@ function runTests() {
     fs.writeFileSync(hooksFile, JSON.stringify({
       "$schema": "https://json.schemastore.org/claude-code-settings.json",
       hooks: {
-        PreToolUse: [{ matcher: 'Write', hooks: [{ type: 'command', command: 'echo ok' }] }],
-        PostToolUse: [{ matcher: 'Read', hooks: [{ type: 'command', command: 'echo done' }] }]
+        PreToolUse: [{ id: 'test:wrapped-pre', matcher: 'Write', hooks: [{ type: 'command', command: 'echo ok' }] }],
+        PostToolUse: [{ id: 'test:wrapped-post', matcher: 'Read', hooks: [{ type: 'command', command: 'echo done' }] }]
       }
     }));
 
@@ -2665,6 +2673,105 @@ function runTests() {
       `Should pass wrapped hooks format, got exit ${result.code}. stderr: ${result.stderr}`);
     assert.ok(result.stdout.includes('Validated 2'),
       `Should validate 2 matchers, got: ${result.stdout}`);
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  if (test('rejects wrapped matcher entry missing id', () => {
+    const testDir = createTestDir();
+    const hooksFile = path.join(testDir, 'hooks.json');
+    fs.writeFileSync(hooksFile, JSON.stringify({
+      hooks: {
+        PreToolUse: [{
+          matcher: 'Write',
+          hooks: [{ type: 'command', command: 'echo missing id' }]
+        }]
+      }
+    }));
+
+    const result = runValidatorWithDir('validate-hooks', 'HOOKS_FILE', hooksFile);
+    assert.strictEqual(result.code, 1, 'Should reject wrapped matcher entries without an id');
+    assert.ok(result.stderr.includes('id'), `Should report missing id, got: ${result.stderr}`);
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  if (test('rejects wrapped matcher entry missing a required matcher', () => {
+    const testDir = createTestDir();
+    const hooksFile = path.join(testDir, 'hooks.json');
+    fs.writeFileSync(hooksFile, JSON.stringify({
+      hooks: {
+        SessionStart: [{
+          id: 'test:missing-matcher',
+          hooks: [{ type: 'command', command: 'echo start' }]
+        }]
+      }
+    }));
+
+    const result = runValidatorWithDir('validate-hooks', 'HOOKS_FILE', hooksFile);
+    assert.strictEqual(result.code, 1);
+    assert.ok(result.stderr.includes('matcher'), result.stderr);
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  if (test('rejects wrapped matcher entry with an empty handlers array', () => {
+    const testDir = createTestDir();
+    const hooksFile = path.join(testDir, 'hooks.json');
+    fs.writeFileSync(hooksFile, JSON.stringify({
+      hooks: { Stop: [{ id: 'test:empty-handlers', hooks: [] }] }
+    }));
+
+    const result = runValidatorWithDir('validate-hooks', 'HOOKS_FILE', hooksFile);
+    assert.strictEqual(result.code, 1);
+    assert.ok(result.stderr.includes('hooks'), result.stderr);
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  if (test('rejects wrapped matcher entry with whitespace-only id', () => {
+    const testDir = createTestDir();
+    const hooksFile = path.join(testDir, 'hooks.json');
+    fs.writeFileSync(hooksFile, JSON.stringify({
+      hooks: {
+        PreToolUse: [{
+          id: '   \t',
+          matcher: 'Write',
+          hooks: [{ type: 'command', command: 'echo blank id' }]
+        }]
+      }
+    }));
+
+    const result = runValidatorWithDir('validate-hooks', 'HOOKS_FILE', hooksFile);
+    assert.strictEqual(result.code, 1, 'Should reject whitespace-only matcher ids');
+    assert.ok(result.stderr.includes('id'), `Should report invalid id, got: ${result.stderr}`);
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  if (test('rejects duplicate wrapped matcher ids across events', () => {
+    const testDir = createTestDir();
+    const hooksFile = path.join(testDir, 'hooks.json');
+    fs.writeFileSync(hooksFile, JSON.stringify({
+      hooks: {
+        PreToolUse: [{
+          id: 'shared:matcher',
+          matcher: 'Write',
+          hooks: [{ type: 'command', command: 'echo pre' }]
+        }],
+        PostToolUse: [{
+          id: 'shared:matcher',
+          matcher: 'Write',
+          hooks: [{ type: 'command', command: 'echo post' }]
+        }]
+      }
+    }));
+
+    const result = runValidatorWithDir('validate-hooks', 'HOOKS_FILE', hooksFile);
+    assert.strictEqual(result.code, 1, 'Should reject matcher ids reused by another event');
+    assert.ok(
+      result.stderr.includes("duplicate id 'shared:matcher'"),
+      `Should report the duplicate id, got: ${result.stderr}`
+    );
+    assert.ok(
+      result.stderr.includes('PreToolUse[0]') && result.stderr.includes('PostToolUse[0]'),
+      `Should report both matcher locations, got: ${result.stderr}`
+    );
     cleanupTestDir(testDir);
   })) passed++; else failed++;
 
@@ -2750,6 +2857,7 @@ function runTests() {
       hooks: {
         UserPromptSubmit: [
           {
+            id: 'test:user-prompt-submit',
             hooks: [
               { type: 'prompt', prompt: 'Summarize the request.' },
               { type: 'agent', prompt: 'Review for security issues.', model: 'gpt-5.4' },
@@ -2798,6 +2906,148 @@ function runTests() {
     assert.strictEqual(result.code, 1, 'Should reject empty SKILL.md');
     assert.ok(result.stderr.includes('Empty file'),
       `Should report "Empty file", got: ${result.stderr}`);
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  // ── Round 84: validate-skills docs/{locale}/skills/ mirror scan (#2630) ──
+
+  console.log('\nRound 84: validate-skills.js (docs/{locale}/skills/ frontmatter, #2630):');
+
+  if (test('flags a glued key onto description as invalid YAML', () => {
+    const testDir = createTestDir();
+    const docsDir = path.join(testDir, 'docs-root');
+    const skillDir = path.join(docsDir, 'ja-JP', 'skills', 'example');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'),
+      '---\nname: example\ndescription: some text.license: Apache-2.0\nversion: 1.0.0\n---\n# Example');
+
+    const result = runSkillsValidator('/nonexistent/skills-dir', ['--strict'], {}, docsDir);
+    assert.strictEqual(result.code, 1, 'Should fail on glued key');
+    assert.ok(result.stderr.includes("unquoted value contains ': '"),
+      `Should report the glued-key defect, got: ${result.stderr}`);
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  if (test('flags a dropped-quote description containing a colon as invalid YAML', () => {
+    const testDir = createTestDir();
+    const docsDir = path.join(testDir, 'docs-root');
+    const skillDir = path.join(docsDir, 'ja-JP', 'skills', 'example');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'),
+      '---\nname: example\ndescription: Verification loop: migrations, linting\n---\n# Example');
+
+    const result = runSkillsValidator('/nonexistent/skills-dir', ['--strict'], {}, docsDir);
+    assert.strictEqual(result.code, 1, 'Should fail on unquoted colon in description');
+    assert.ok(result.stderr.includes("unquoted value contains ': '"),
+      `Should report the dropped-quote defect, got: ${result.stderr}`);
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  if (test('flags a description starting with the reserved @ indicator', () => {
+    const testDir = createTestDir();
+    const docsDir = path.join(testDir, 'docs-root');
+    const skillDir = path.join(docsDir, 'ja-JP', 'skills', 'example');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'),
+      '---\nname: example\ndescription: @Observable state management\n---\n# Example');
+
+    const result = runSkillsValidator('/nonexistent/skills-dir', ['--strict'], {}, docsDir);
+    assert.strictEqual(result.code, 1, 'Should fail on leading @');
+    assert.ok(result.stderr.includes("reserved character '@'"),
+      `Should report the reserved-indicator defect, got: ${result.stderr}`);
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  if (test('preserves # inside a quoted frontmatter value', () => {
+    const testDir = createTestDir();
+    const docsDir = path.join(testDir, 'docs-root');
+    const skillDir = path.join(docsDir, 'ja-JP', 'skills', 'example');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'),
+      '---\nname: example\ndescription: "Fix: details #tag" # translation note\n---\n# Example');
+
+    const result = runSkillsValidator('/nonexistent/skills-dir', ['--strict'], {}, docsDir);
+    assert.strictEqual(result.code, 0,
+      `Quoted # content must remain valid, got stderr: ${result.stderr}`);
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  if (test('rejects malformed quoted skill frontmatter', () => {
+    const testDir = createTestDir();
+    const skillDir = path.join(testDir, 'malformed-quote');
+    fs.mkdirSync(skillDir);
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'),
+      '---\nname: malformed-quote\ndescription: "unterminated\n---\n# Example');
+
+    const result = runSkillsValidator(testDir, ['--strict']);
+    assert.strictEqual(result.code, 1, 'Strict validation must reject malformed YAML');
+    assert.ok(result.stderr.includes('invalid YAML'),
+      `Should report the YAML parse failure, got: ${result.stderr}`);
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  if (test('rejects an empty folded skill description', () => {
+    const testDir = createTestDir();
+    const skillDir = path.join(testDir, 'empty-folded-description');
+    fs.mkdirSync(skillDir);
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'),
+      '---\nname: empty-folded-description\ndescription: >\n---\n# Example');
+
+    const result = runSkillsValidator(testDir, ['--strict']);
+    assert.strictEqual(result.code, 1, 'Strict validation must reject an empty folded scalar');
+    assert.ok(result.stderr.includes("'description' is empty"),
+      `Should report the empty parsed description, got: ${result.stderr}`);
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  if (test('reports an unreadable docs root deterministically', () => {
+    const testDir = createTestDir();
+    const docsPath = path.join(testDir, 'docs-file');
+    fs.writeFileSync(docsPath, 'not a directory');
+
+    const result = runSkillsValidator('/nonexistent/skills-dir', ['--strict'], {}, docsPath);
+    assert.strictEqual(result.code, 1, 'Should fail when the docs root cannot be read');
+    assert.strictEqual(result.stderr.trim(), 'ERROR: unable to read docs directory');
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  if (test('flags a docs mirror SKILL.md with no frontmatter block at all', () => {
+    const testDir = createTestDir();
+    const docsDir = path.join(testDir, 'docs-root');
+    const skillDir = path.join(docsDir, 'ja-JP', 'skills', 'example');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '# Example\n\nNo frontmatter here.');
+
+    const result = runSkillsValidator('/nonexistent/skills-dir', ['--strict'], {}, docsDir);
+    assert.strictEqual(result.code, 1, 'Should fail when docs mirror has no frontmatter');
+    assert.ok(result.stderr.includes('no frontmatter block found'),
+      `Should report the missing-frontmatter defect, got: ${result.stderr}`);
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  if (test('curated skills/ still tolerates a SKILL.md with no frontmatter (unchanged)', () => {
+    const testDir = createTestDir();
+    const skillDir = path.join(testDir, 'no-frontmatter-skill');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '# Example\n\nNo frontmatter here.');
+
+    const result = runSkillsValidator(testDir, ['--strict']);
+    assert.strictEqual(result.code, 0,
+      `Curated skills/ must not require frontmatter, got stderr: ${result.stderr}`);
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  if (test('passes on a valid docs/{locale}/skills/ mirror', () => {
+    const testDir = createTestDir();
+    const docsDir = path.join(testDir, 'docs-root');
+    const skillDir = path.join(docsDir, 'zh-CN', 'skills', 'example');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'),
+      '---\nname: example\ndescription: "Well-formed: quoted value"\n---\n# Example');
+
+    const result = runSkillsValidator('/nonexistent/skills-dir', ['--strict'], {}, docsDir);
+    assert.strictEqual(result.code, 0, `Should pass on well-formed mirror, got: ${result.stderr}`);
+    assert.ok(result.stdout.includes('Validated 1'), 'Should count the one docs skill file');
     cleanupTestDir(testDir);
   })) passed++; else failed++;
 

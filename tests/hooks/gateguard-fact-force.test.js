@@ -105,6 +105,38 @@ function runBashHook(input, env = {}) {
   };
 }
 
+function runPowerShellHook(input, env = {}) {
+  const rawInput = typeof input === 'string' ? input : JSON.stringify(input);
+  const result = spawnSync(
+    'node',
+    [
+      runner,
+      'pre:powershell:gateguard-fact-force',
+      'scripts/hooks/gateguard-fact-force.js',
+      'standard,strict'
+    ],
+    {
+      input: rawInput,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        ECC_HOOK_PROFILE: 'standard',
+        GATEGUARD_STATE_DIR: stateDir,
+        CLAUDE_SESSION_ID: TEST_SESSION_ID,
+        ...env
+      },
+      timeout: 15000,
+      stdio: ['pipe', 'pipe', 'pipe']
+    }
+  );
+
+  return {
+    code: Number.isInteger(result.status) ? result.status : 1,
+    stdout: result.stdout || '',
+    stderr: result.stderr || ''
+  };
+}
+
 function parseOutput(stdout) {
   try {
     return JSON.parse(stdout);
@@ -145,6 +177,8 @@ function runTests() {
       assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes('Fact-Forcing Gate'));
       assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes('import/require'));
       assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes('/src/app.js'));
+      assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes('GATEGUARD_EXEMPT_GLOBS'), 'Edit denial should show the path-scoped exemption control');
+      assert.ok(!output.hookSpecificOutput.permissionDecisionReason.includes('GATEGUARD_BASH_ROUTINE_DISABLED'), 'Edit denial should not suggest the routine Bash control');
     })
   )
     passed++;
@@ -538,6 +572,8 @@ function runTests() {
       assert.strictEqual(output.hookSpecificOutput.permissionDecision, 'deny');
       assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes('ECC_GATEGUARD=off'), 'denial reason should show the direct recovery env toggle');
       assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes('ECC_DISABLED_HOOKS'), 'denial reason should mention the existing hook-id disable control');
+      assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes('GATEGUARD_EXEMPT_GLOBS'), 'Edit/Write denial should show the path-scoped exemption control');
+      assert.ok(!output.hookSpecificOutput.permissionDecisionReason.includes('GATEGUARD_BASH_ROUTINE_DISABLED'), 'Edit/Write denial should not suggest the routine Bash control');
     })
   )
     passed++;
@@ -558,6 +594,9 @@ function runTests() {
       assert.strictEqual(output.hookSpecificOutput.permissionDecision, 'deny');
       assert.ok(reason.includes('pre:bash:gateguard-fact-force'), 'routine Bash denial should show the Bash hook ID');
       assert.ok(!reason.includes('pre:edit-write:gateguard-fact-force'), 'routine Bash denial should not show the Edit/Write hook ID as the targeted disable');
+      assert.ok(reason.includes('GATEGUARD_BASH_ROUTINE_DISABLED=1'), 'routine Bash denial should show the narrow routine-gate control');
+      assert.ok(reason.includes('destructive Bash checks remain active'), 'routine Bash denial should preserve the destructive-check safety boundary');
+      assert.ok(!reason.includes('GATEGUARD_EXEMPT_GLOBS'), 'routine Bash denial should not suggest the Edit/Write path control');
     })
   )
     passed++;
@@ -577,6 +616,9 @@ function runTests() {
       assert.strictEqual(output.hookSpecificOutput.permissionDecision, 'deny');
       assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes('Destructive command detected'));
       assert.ok(!output.hookSpecificOutput.permissionDecisionReason.includes('ECC_GATEGUARD=off'), 'destructive gate should not advertise disabling GateGuard');
+      assert.ok(!output.hookSpecificOutput.permissionDecisionReason.includes('ECC_DISABLED_HOOKS'), 'destructive gate should not advertise disabling its hook');
+      assert.ok(!output.hookSpecificOutput.permissionDecisionReason.includes('GATEGUARD_BASH_ROUTINE_DISABLED'), 'destructive gate should not advertise the routine-only bypass');
+      assert.ok(!output.hookSpecificOutput.permissionDecisionReason.includes('GATEGUARD_EXEMPT_GLOBS'), 'destructive gate should not advertise the Edit/Write path exemption');
     })
   )
     passed++;
@@ -602,6 +644,7 @@ function runTests() {
       assert.strictEqual(output.hookSpecificOutput.permissionDecision, 'deny');
       assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes('Fact-Forcing Gate'));
       assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes('/src/multi-a.js'));
+      assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes('GATEGUARD_EXEMPT_GLOBS'), 'MultiEdit denial should show the path-scoped exemption control');
     })
   )
     passed++;
@@ -1478,6 +1521,395 @@ function runTests() {
   else failed++;
 
   if (
+    test('allows destructive SQL prose inside a quoted heredoc', () => {
+      expectAllow(
+        [
+          "cat > migration-notes.md <<'EOF'",
+          'This migration will DROP TABLE old_sessions after verification.',
+          'EOF'
+        ].join('\n'),
+        'quoted heredoc SQL prose'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('allows destructive prose and separators inside an unquoted heredoc', () => {
+      expectAllow(
+        [
+          'cat > migration-notes.md <<EOF',
+          'Document only: DELETE FROM sessions; rm -rf old-cache',
+          'EOF'
+        ].join('\n'),
+        'unquoted heredoc prose'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('allows destructive prose inside a tab-stripping heredoc', () => {
+      expectAllow(
+        [
+          'cat > migration-notes.md <<-EOF',
+          '\tTRUNCATE old_sessions; rm -rf old-cache',
+          '\tEOF'
+        ].join('\n'),
+        'tab-stripping heredoc prose'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('handles multiple heredoc redirections in declaration order', () => {
+      expectAllow(
+        [
+          "cat <<ONE <<'TWO'",
+          'DELETE FROM sessions is documentation here.',
+          'ONE',
+          '$(rm -rf /tmp/example-only)',
+          'TWO'
+        ].join('\n'),
+        'multiple heredoc redirections'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('fails closed when a shell consumes the heredoc payload', () => {
+      for (const command of [
+        ['bash <<EOF', 'rm -rf /tmp/shell-input-target', 'EOF'].join('\n'),
+        ["sh <<'EOF'", 'git reset --hard', 'EOF'].join('\n'),
+        ['cat <<EOF | sh', 'rm -rf /tmp/piped-shell-target', 'EOF'].join('\n'),
+        ["cat > /tmp/review-script <<'EOF'", 'rm -rf /tmp/persisted-target', 'EOF', 'bash /tmp/review-script'].join('\n')
+      ]) {
+        expectDestructiveDeny(command, 'shell-executed heredoc payload');
+      }
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('does not rescan a here-string as a heredoc', () => {
+      expectDestructiveDeny(
+        ['cat <<<EOF', 'rm -rf /tmp/here-string-followup'].join('\n'),
+        'command after here-string'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('uses shell-correct single-quote escaping while finding heredocs', () => {
+      expectDestructiveDeny(
+        ["echo 'a\\'X'<<EOF 'Y'b\\'", 'rm -rf /tmp/quoted-followup'].join('\n'),
+        'command after quoted non-heredoc text'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('fails closed on an unclosed heredoc body', () => {
+      expectDestructiveDeny(
+        ['cat <<EOF', 'rm -rf /tmp/unclosed-heredoc'].join('\n'),
+        'unclosed heredoc body'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('still denies destructive commands after a heredoc terminator', () => {
+      expectDestructiveDeny(
+        [
+          "cat > migration-notes.md <<'EOF'",
+          'DROP TABLE is documentation here.',
+          'EOF',
+          'rm -rf /tmp/real-target'
+        ].join('\n'),
+        'command after heredoc terminator'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('still denies command substitutions inside an unquoted heredoc', () => {
+      expectDestructiveDeny(
+        [
+          'cat > output.txt <<EOF',
+          '$(rm -rf /tmp/expanded-target)',
+          'EOF'
+        ].join('\n'),
+        'unquoted heredoc command substitution'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('allows literal command substitutions inside a quoted heredoc', () => {
+      expectAllow(
+        [
+          "cat > example.md <<'EOF'",
+          '$(rm -rf /tmp/example-only)',
+          'EOF'
+        ].join('\n'),
+        'quoted heredoc command-substitution prose'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('does not mistake an arithmetic shift for a heredoc', () => {
+      expectDestructiveDeny(
+        ['echo $((1 << 2))', 'rm -rf /tmp/real-target'].join('\n'),
+        'command after arithmetic shift'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('does not mistake a named arithmetic shift operand for a heredoc', () => {
+      expectDestructiveDeny(
+        ['echo $((flags << WIDTH))', 'rm -rf /tmp/real-target'].join('\n'),
+        'command after named arithmetic shift'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('fails closed on multiline arithmetic shift contexts', () => {
+      for (const arithmetic of [
+        ['((', 'flags << WIDTH', '))'],
+        ['$((', 'flags << WIDTH', '))'],
+        ['$[', 'flags << WIDTH', ']']
+      ]) {
+        expectDestructiveDeny(
+          [...arithmetic, 'rm -rf /tmp/real-target'].join('\n'),
+          'command after multiline arithmetic shift'
+        );
+      }
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('does not mistake a conditional string operator for a heredoc', () => {
+      expectDestructiveDeny(
+        ['[[ alpha << omega ]]', 'rm -rf /tmp/real-target'].join('\n'),
+        'command after conditional shift-like operator'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('does not parse heredocs inside operator-adjacent comments', () => {
+      expectDestructiveDeny(
+        ['true;# <<EOF', 'rm -rf /tmp/real-target'].join('\n'),
+        'command after commented heredoc marker'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('fails closed on heredoc markers inside multiline quotes', () => {
+      expectDestructiveDeny(
+        ['printf \'%s\' "literal', '<<EOF', 'still literal"', 'rm -rf /tmp/real-target'].join('\n'),
+        'command after multiline quoted heredoc marker'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('fails closed on ANSI-C quoted heredoc delimiters', () => {
+      expectDestructiveDeny(
+        ["cat <<$'EOF'", 'documentation', 'EOF', 'rm -rf /tmp/real-target'].join('\n'),
+        'command after ANSI-C heredoc'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('fails closed on escaped heredoc delimiter words', () => {
+      expectDestructiveDeny(
+        ['cat <<E\\', 'OF', 'documentation', 'EOF', 'rm -rf /tmp/real-target'].join('\n'),
+        'command after escaped heredoc delimiter'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('denies multiline command substitutions inside an unquoted heredoc', () => {
+      expectDestructiveDeny(
+        ['cat <<EOF', '$(', 'rm -rf /tmp/expanded-target', ')', 'EOF'].join('\n'),
+        'multiline unquoted heredoc command substitution'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('denies multiline backtick substitutions inside an unquoted heredoc', () => {
+      expectDestructiveDeny(
+        ['cat <<EOF', '`', 'rm -rf /tmp/expanded-target', '`', 'EOF'].join('\n'),
+        'multiline unquoted heredoc backtick substitution'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('denies line-continued command substitutions inside an unquoted heredoc', () => {
+      expectDestructiveDeny(
+        ['cat <<EOF', '$\\', '(', 'rm -rf /tmp/expanded-target', ')', 'EOF'].join('\n'),
+        'line-continued unquoted heredoc command substitution'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('denies split command names after heredoc line continuation', () => {
+      expectDestructiveDeny(
+        ['cat <<EOF', '$(r\\', 'm -rf /tmp/expanded-target', ')', 'EOF'].join('\n'),
+        'split command name in unquoted heredoc substitution'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('allows a joined command when tab stripping removes the option separator', () => {
+      expectAllow(
+        ['cat <<-EOF', '\t$(rm\\', '\t-rf /tmp/expanded-target)', 'EOF'].join('\n'),
+        'tab stripping joins rm and -rf into a harmless command name'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('denies split command names after tab-stripped heredoc continuations', () => {
+      expectDestructiveDeny(
+        ['cat <<-EOF', '\t$(r\\', '\tm -rf /tmp/expanded-target)', 'EOF'].join('\n'),
+        'split command name in tab-stripped unquoted heredoc substitution'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('fails closed on line-continued unquoted heredoc terminators', () => {
+      expectDestructiveDeny(
+        ['cat <<EOF', 'payload', 'EO\\', 'F', 'rm -rf /tmp/real-target'].join('\n'),
+        'command after line-continued heredoc terminator'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('allows escaped command-substitution prose in an unquoted heredoc', () => {
+      expectAllow(
+        ['cat <<EOF', '\\$(echo example)', 'DROP TABLE is documentation here.', 'EOF'].join('\n'),
+        'escaped unquoted heredoc command-substitution prose'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('denies substitutions inside literal quote characters in an unquoted heredoc', () => {
+      for (const payload of [
+        "'$(rm -rf /tmp/expanded-target)'",
+        '"$(rm -rf /tmp/expanded-target)"',
+        "'`rm -rf /tmp/expanded-target`'"
+      ]) {
+        expectDestructiveDeny(
+          ['cat <<EOF', payload, 'EOF'].join('\n'),
+          'quoted-looking unquoted heredoc substitution'
+        );
+      }
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('allows quoted destructive prose inside a harmless heredoc substitution', () => {
+      expectAllow(
+        ['cat <<EOF', "$(printf '%s' 'rm -rf /tmp/example-only')", 'EOF'].join('\n'),
+        'quoted prose inside heredoc substitution'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('still denies destructive commands after arithmetic shifts', () => {
+      expectDestructiveDeny(
+        ['echo $((1 << 2))', 'rm -rf /tmp/shift-target'].join('\n'),
+        'command after $((...)) arithmetic shift'
+      );
+      expectDestructiveDeny(
+        ['echo $((x << 2))', 'rm -rf /tmp/shift-target'].join('\n'),
+        'command after $((...)) identifier shift'
+      );
+      expectDestructiveDeny(
+        ['(( 1 << 2 ))', 'rm -rf /tmp/shift-target'].join('\n'),
+        'command after ((...)) arithmetic shift'
+      );
+      expectDestructiveDeny(
+        ['echo $[x << 1]', 'rm -rf /tmp/shift-target'].join('\n'),
+        'command after legacy $[...] arithmetic shift'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
     test('allows git push --force-if-includes as a safety-checked variant', () => {
       expectAllow('git push --force-with-lease --force-if-includes origin main', 'git push --force-if-includes');
     })
@@ -2167,6 +2599,7 @@ function runTests() {
       assert.ok(!reason.includes('present these facts'), 'no repeated four-fact block');
       assert.ok(!reason.includes('\n'), 'condensed message is a single line');
       assert.ok(reason.includes('ECC_GATEGUARD=off'), 'condensed message keeps a recovery hint');
+      assert.ok(reason.includes('GATEGUARD_EXEMPT_GLOBS'), 'condensed Edit denial keeps the path-scoped recovery hint');
     })
   )
     passed++;
@@ -2182,6 +2615,8 @@ function runTests() {
       const secondReason = second.hookSpecificOutput.permissionDecisionReason;
       assert.ok(firstReason.includes('denial #6'), `expected ordinal 6, got: ${firstReason}`);
       assert.ok(secondReason.includes('denial #7'), `expected ordinal 7, got: ${secondReason}`);
+      assert.ok(firstReason.includes('GATEGUARD_EXEMPT_GLOBS'), 'condensed Write denial keeps the path-scoped recovery hint');
+      assert.ok(!firstReason.includes('GATEGUARD_BASH_ROUTINE_DISABLED'), 'condensed Write denial should not suggest the routine Bash control');
       assert.notStrictEqual(firstReason, secondReason, 'successive denials must differ so they cannot compound verbatim');
     })
   )
@@ -2246,6 +2681,7 @@ function runTests() {
       assert.strictEqual(output.hookSpecificOutput.permissionDecision, 'deny');
       assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes('denial #5'));
       assert.ok(!output.hookSpecificOutput.permissionDecisionReason.includes('present these facts'));
+      assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes('GATEGUARD_EXEMPT_GLOBS'), 'condensed MultiEdit denial keeps the path-scoped recovery hint');
     })
   )
     passed++;
@@ -2384,7 +2820,7 @@ function runTests() {
         tool_name: 'Edit',
         tool_input: { file_path: '/proj/tests/test_x.js', old_string: 'a', new_string: 'b' }
       };
-      const result = runHook(input, { GATEGUARD_EXEMPT_GLOBS: '**/tests/**' });
+      const result = runHook(input, { GATEGUARD_EXEMPT_GLOBS: '**/tests/**', CLAUDE_PROJECT_DIR: '/proj' });
       assert.strictEqual(result.code, 0, 'exit code should be 0');
       const output = parseOutput(result.stdout);
       assert.ok(output, 'should produce valid JSON output');
@@ -2420,7 +2856,7 @@ function runTests() {
       clearState();
       const exempt = runHook(
         { tool_name: 'Write', tool_input: { file_path: '/tmp/x/scratchpad/s.js', content: 'x' } },
-        { GATEGUARD_EXEMPT_GLOBS: globs }
+        { GATEGUARD_EXEMPT_GLOBS: globs, CLAUDE_PROJECT_DIR: '/tmp/x' }
       );
       const exemptOut = parseOutput(exempt.stdout);
       assert.ok(exemptOut, 'should produce JSON output');
@@ -2451,6 +2887,218 @@ function runTests() {
       const output = parseOutput(result.stdout);
       assert.ok(output, 'should produce JSON output');
       assert.strictEqual(output.hookSpecificOutput.permissionDecision, 'deny', 'no exemptions when unset');
+    })
+  )
+    passed++;
+  else failed++;
+
+  for (const { glob, filePath, cwd = '/proj', exempt } of [
+    { glob: 'services/**', filePath: '/proj/services/api.js', exempt: true },
+    { glob: 'services/**', filePath: '/other/services/api.js', exempt: false },
+    { glob: 'services/**', filePath: '/proj/vendor/services/api.js', exempt: false },
+    { glob: 'services/**', filePath: '/proj/my-services/api.js', exempt: false },
+    { glob: '*.md', filePath: '/proj/notes.md/outline.txt', exempt: false },
+    { glob: '*.md', filePath: '/proj/docs/notes.md', exempt: false },
+    { glob: '*.md', filePath: '/other/notes.md', exempt: false },
+    { glob: 'README.md', filePath: '/proj/readme.md', exempt: true },
+    { glob: '*.md', filePath: './notes.md', exempt: true },
+    { glob: '**/*.md', filePath: '/proj/docs/notes.md', exempt: true },
+    { glob: '**/*.md', filePath: '/proj/notes.md', exempt: true },
+    { glob: '**/*.md', filePath: '../other/notes.md', exempt: false },
+    { glob: 'docs/?otes.md', filePath: '/proj/docs/notes.md', exempt: true },
+    { glob: 'docs?notes.md', filePath: '/proj/docs/notes.md', exempt: false },
+    { glob: 'services/**', filePath: 'C:\\proj\\services\\api.js', cwd: 'C:\\proj', exempt: true },
+    { glob: 'services/**', filePath: 'C:\\other\\services\\api.js', cwd: 'C:\\proj', exempt: false },
+    { glob: '/approved/docs/**', filePath: '/approved/docs/notes.md', exempt: true },
+  ]) {
+    clearState();
+    if (test(`scopes exempt glob ${glob} for ${filePath}`, () => {
+      const result = runHook(
+        { cwd, tool_name: 'Edit', tool_input: { file_path: filePath } },
+        { GATEGUARD_EXEMPT_GLOBS: glob, CLAUDE_PROJECT_DIR: cwd }
+      );
+      const output = parseOutput(result.stdout);
+      assert.strictEqual(output?.hookSpecificOutput?.permissionDecision === 'deny', !exempt);
+    })) passed++;
+    else failed++;
+  }
+
+  clearState();
+  if (test('MultiEdit gates outside-project targets even when another target is exempt', () => {
+    const result = runHook({
+      cwd: '/proj', tool_name: 'MultiEdit',
+      tool_input: { edits: [{ file_path: '/proj/docs/a.md' }, { file_path: '/other/docs/b.md' }] }
+    }, { GATEGUARD_EXEMPT_GLOBS: 'docs/**', CLAUDE_PROJECT_DIR: '/proj' });
+    const output = parseOutput(result.stdout);
+    assert.strictEqual(output?.hookSpecificOutput?.permissionDecision, 'deny');
+    assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes('/other/docs/b.md'));
+  })) passed++;
+  else failed++;
+
+  // --- PowerShell tool consumer contract ---
+  if (
+    test('normalizes PowerShell tool-name casing before destructive classification', () => {
+      for (const toolName of ['PowerShell', 'powershell', 'POWERSHELL']) {
+        clearState();
+        const result = runPowerShellHook({
+          tool_name: toolName,
+          tool_input: { command: 'Remove-Item -Force C:/tmp/demo' }
+        });
+        assert.strictEqual(result.code, 0, `${toolName} hook should exit 0`);
+        const output = parseOutput(result.stdout);
+        assert.ok(output, `${toolName} should produce JSON output`);
+        assert.strictEqual(
+          output.hookSpecificOutput?.permissionDecision,
+          'deny',
+          `${toolName} should be denied`
+        );
+        assert.match(
+          output.hookSpecificOutput.permissionDecisionReason,
+          /Destructive command detected/
+        );
+      }
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('denies the first routine PowerShell command and allows its retry', () => {
+      clearState();
+      const input = {
+        tool_name: 'PowerShell',
+        tool_input: { command: 'Get-Date' }
+      };
+
+      const first = runPowerShellHook(input);
+      assert.strictEqual(first.code, 0, 'first PowerShell hook should exit 0');
+      const firstOutput = parseOutput(first.stdout);
+      assert.ok(firstOutput, 'first PowerShell attempt should produce JSON output');
+      assert.strictEqual(
+        firstOutput.hookSpecificOutput?.permissionDecision,
+        'deny',
+        'first routine PowerShell command should be denied'
+      );
+      assert.match(
+        firstOutput.hookSpecificOutput.permissionDecisionReason,
+        /pre:powershell:gateguard-fact-force/,
+        'recovery guidance should name the independently configurable PowerShell hook ID'
+      );
+
+      const retry = runPowerShellHook(input);
+      assert.strictEqual(retry.code, 0, 'PowerShell retry should exit 0');
+      const retryOutput = parseOutput(retry.stdout);
+      assert.ok(retryOutput, 'PowerShell retry should produce JSON output');
+      if (retryOutput.hookSpecificOutput) {
+        assert.notStrictEqual(
+          retryOutput.hookSpecificOutput.permissionDecision,
+          'deny',
+          'routine PowerShell retry should be allowed'
+        );
+      } else {
+        assert.strictEqual(retryOutput.tool_name, 'PowerShell');
+      }
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('denies direct and nested destructive PowerShell commands', () => {
+      const encodedPayload = Buffer.from(
+        'Remove-Item -Force C:/tmp/demo',
+        'utf16le'
+      ).toString('base64');
+      const commands = [
+        'Remove-Item -Recurse C:/tmp/demo',
+        'rp -Force HKCU:/Software/Demo -Name setting',
+        'Clear-Disk -Number 2 -RemoveData -Confirm:$false',
+        'pwsh -Command "Remove-Item -Force C:/tmp/demo"',
+        'pwsh -Command:"Remove-Item -Force C:/tmp/demo"',
+        `pwsh -EncodedCommand:${encodedPayload}`,
+        "$payload='Remove-Item -Force C:/tmp/demo'; pwsh -Command $payload",
+        "$payload='Remove-Item -Force C:/tmp/demo'; pwsh -Command \"$payload\"",
+        "$payload='Remove-Item -Force C:/tmp/demo'; pwsh -Command \"Write-Output ready; $payload\"",
+        "$payload='Remove-Item'; pwsh -Command $payload -Force C:/tmp/demo",
+        "$cmd='Remove-Item'; Set-Alias zap $cmd; zap -Force C:/tmp/demo",
+        "$cmd='Remove-Item'; Set-Alias -Name zap $cmd; zap -Force C:/tmp/demo",
+        "$cmd='Remove-Item'; Set-Alias -Scope Global -Name zap $cmd; zap -Force C:/tmp/demo",
+        "$cmd='Remove-Item'; New-Alias -Description demo -Name zap $cmd; zap -Force C:/tmp/demo",
+        "$cmd='Remove-Item'; sal -Option AllScope -Name zap $cmd; zap -Force C:/tmp/demo",
+        'Set-Alias -Unknown demo -Name zap Write-Output; zap ok',
+
+        'Set-Alias -Name zap Remove-Item; zap -Force C:/tmp/demo',
+        'Set-Alias -Name zap $cmd; zap -Force C:/tmp/demo',
+        "$cmd='Remove-Item'; Set-Alias -Value $cmd zap; zap -Force C:/tmp/demo",
+        "$payload='Remove-Item -Force C:/tmp/demo'; $payload | pwsh -Command -",
+        "$payload='Remove-Item -Force C:/tmp/demo'; Write-Output $payload | pwsh -Command -",
+        "Set-Alias zap $cmd; zap -Force C:/tmp/demo; $cmd='Write-Output'",
+        "$payload | pwsh -Command -; $payload='Write-Output ok'",
+        'pwsh -Command "Write-Output ready; $runtimePayload"',
+        'pwsh -Command $runtimePayload -Force C:/tmp/demo',
+        'Write-Output "$(Remove-Item -Force C:/tmp/demo)"',
+        '& { Remove-Item -Force C:/tmp/demo }',
+        'if ($true) { Remove-Item -Force C:/tmp/demo }',
+        '@(Remove-Item -Force C:/tmp/demo)',
+        'cmd /c "rd /s /q C:/tmp/demo"',
+        'Remove-Item `\n-Force C:/tmp/demo',
+        '# (\nRemove-Item -Force C:/tmp/demo',
+        '<# ignored <# #> Remove-Item -Force C:/tmp/demo',
+        'function cleanup { Remove-Item -Force C:/tmp/demo }; if ($true) { cleanup }',
+        'cmd /c pwsh -Command "Remove-Item -Force C:/tmp/demo"',
+        '@"\n" # $(Remove-Item -Force C:/tmp/demo)\n"@',
+        '& ‘Remove-Item’ -Force C:/tmp/demo',
+        'Invoke-Expression $runtimeValue',
+        'pwsh -Command "$payload"; $payload = "Write-Output ok"'
+      ];
+
+      for (const command of commands) {
+        clearState();
+        const result = runPowerShellHook({
+          tool_name: 'PowerShell',
+          tool_input: { command }
+        });
+        assert.strictEqual(result.code, 0, `${command} hook should exit 0`);
+        const output = parseOutput(result.stdout);
+        assert.ok(output, `${command} should produce JSON output`);
+        assert.strictEqual(
+          output.hookSpecificOutput?.permissionDecision,
+          'deny',
+          `${command} should be denied`
+        );
+        assert.match(
+          output.hookSpecificOutput.permissionDecisionReason,
+          /Destructive command detected/
+        );
+      }
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('allows benign PowerShell after the shared routine shell gate is satisfied', () => {
+      clearState();
+      writeState({ checked: ['__bash_session__'], last_active: Date.now() });
+
+      for (const command of ['Get-ChildItem C:/tmp', 'Remove-Item C:/tmp/notes.txt']) {
+        const result = runPowerShellHook({
+          tool_name: 'PowerShell',
+          tool_input: { command }
+        });
+        assert.strictEqual(result.code, 0, `${command} hook should exit 0`);
+        const output = parseOutput(result.stdout);
+        assert.ok(output, `${command} should produce JSON output`);
+        if (output.hookSpecificOutput) {
+          assert.notStrictEqual(
+            output.hookSpecificOutput.permissionDecision,
+            'deny',
+            `${command} should not receive a destructive denial`
+          );
+        } else {
+          assert.strictEqual(output.tool_name, 'PowerShell');
+        }
+      }
     })
   )
     passed++;
